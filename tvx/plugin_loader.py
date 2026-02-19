@@ -1,56 +1,46 @@
-import os
-import sys
+"""
+TRACEVECTOR Plugin Loader
+Pip-safe, package-based discovery
+"""
+
 import importlib
+import pkgutil
+from typing import List
 
 
-def get_base_path():
-    """
-    Returns correct base path for:
-    - normal Python execution
-    - PyInstaller onefile binary
-    """
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        return sys._MEIPASS
-    return os.path.dirname(os.path.abspath(__file__))
+PLUGIN_PACKAGE = "tvx.plugins"
 
 
-def load_plugins(target_type):
+def load_plugins(command: str) -> List[object]:
     plugins = []
 
-    base_path = get_base_path()
-    plugin_path = os.path.join(base_path, "tvx", "plugins")
-
-    if not os.path.isdir(plugin_path):
-        print(f"[!] Plugin directory not found: {plugin_path}")
+    try:
+        package = importlib.import_module(PLUGIN_PACKAGE)
+    except ModuleNotFoundError:
         return plugins
 
-    for file in os.listdir(plugin_path):
-        if not file.endswith(".py"):
-            continue
-        if file.startswith("_"):
-            continue
-
-        module_name = f"tvx.plugins.{file[:-3]}"
-
+    for _, module_name, _ in pkgutil.iter_modules(package.__path__):
         try:
-            mod = importlib.import_module(module_name)
-        except Exception as e:
-            print(f"[!] Failed to load plugin {file}: {e}")
+            module = importlib.import_module(f"{PLUGIN_PACKAGE}.{module_name}")
+        except Exception:
             continue
 
-        if getattr(mod, "PLUGIN_TYPE", None) == target_type:
-            plugins.append(mod)
+        if hasattr(module, "COMMAND") and module.COMMAND == command:
+            if hasattr(module, "Plugin"):
+                plugins.append(module.Plugin())
 
     return plugins
 
-def list_all_plugins():
-    all_plugins = []
-    for t in ("phone", "ip", "email"):
-        plugins = load_plugins(t)
-        for p in plugins:
-            all_plugins.append({
-                "type": t,
-                "name": getattr(p, "PLUGIN_NAME", "unknown"),
-                "module": p.__name__
-            })
-    return all_plugins
+
+def discover_plugins() -> List[str]:
+    names = []
+
+    try:
+        package = importlib.import_module(PLUGIN_PACKAGE)
+    except ModuleNotFoundError:
+        return names
+
+    for _, module_name, _ in pkgutil.iter_modules(package.__path__):
+        names.append(module_name)
+
+    return names

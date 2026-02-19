@@ -1,17 +1,39 @@
 import sys
-import os
-import tvx.plugin_loader as loader
+import platform
+from importlib import util
+
+from tvx import __version__
+from tvx import plugin_loader
+
 
 def run_doctor():
-    print("[*] TRACEVECTOR Doctor\n")
+    print("TRACEVECTOR Doctor\n")
 
-    print("[+] Python executable:", sys.executable)
-    print("[+] Frozen binary:", getattr(sys, 'frozen', False))
+    # Version
+    print(f"[+] Version: {__version__}")
 
-    plugins = loader.list_all_plugins()
+    # Frozen binary check
+    frozen = getattr(sys, "frozen", False)
+    print(f"[+] Frozen binary: {frozen}")
+
+    # Python executable
+    print(f"[+] Python: {sys.executable}")
+
+    # Platform
+    print(f"[+] Platform: {platform.system()} {platform.release()}")
+
+    # Plugin diagnostics
+    plugins = []
+    try:
+        plugins = plugin_loader.list_plugins()
+    except Exception as e:
+        print(f"[!] Plugin loader error: {e}")
+
     print(f"[+] Plugins detected: {len(plugins)}")
 
     for p in plugins:
-        print(f"    - [{p['type']}] {p['name']}")
+        name = p.get("command", "unknown")
+        desc = p.get("name", "unnamed plugin")
+        print(f"    - [{name}] {desc}")
 
     print("\n[✓] Environment looks healthy")
