@@ -24,3 +24,10 @@ It runs as a **single portable binary**, supports a **plugin-based architecture*
 ```bash
 chmod +x tvx
 ./tvx --version
+### Option 2: Use pip
+'''bash
+pip instal tracevector
+
+### v2.5.0 Help Text
+TRACEVECTOR performs lawful, metadata-based OSINT only.
+Private communications are never accessed.
