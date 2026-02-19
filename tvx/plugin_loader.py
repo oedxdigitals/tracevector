@@ -1,46 +1,27 @@
-"""
-TRACEVECTOR Plugin Loader
-Pip-safe, package-based discovery
-"""
+# tvx/plugin_loader.py
 
-import importlib
 import pkgutil
-from typing import List
+import importlib
+import tvx.plugins
 
-
-PLUGIN_PACKAGE = "tvx.plugins"
-
-
-def load_plugins(command: str) -> List[object]:
+def load_all_plugins():
     plugins = []
 
-    try:
-        package = importlib.import_module(PLUGIN_PACKAGE)
-    except ModuleNotFoundError:
-        return plugins
+    for _, module_name, _ in pkgutil.iter_modules(tvx.plugins.__path__):
+        module = importlib.import_module(f"tvx.plugins.{module_name}")
 
-    for _, module_name, _ in pkgutil.iter_modules(package.__path__):
-        try:
-            module = importlib.import_module(f"{PLUGIN_PACKAGE}.{module_name}")
-        except Exception:
-            continue
-
-        if hasattr(module, "COMMAND") and module.COMMAND == command:
-            if hasattr(module, "Plugin"):
-                plugins.append(module.Plugin())
+        if hasattr(module, "PLUGIN_INFO") and hasattr(module, "run"):
+            plugins.append(module)
 
     return plugins
 
 
-def discover_plugins() -> List[str]:
-    names = []
+def get_plugins_by_type(target_type):
+    return [
+        p for p in load_all_plugins()
+        if p.PLUGIN_INFO.get("type") == target_type
+    ]
 
-    try:
-        package = importlib.import_module(PLUGIN_PACKAGE)
-    except ModuleNotFoundError:
-        return names
 
-    for _, module_name, _ in pkgutil.iter_modules(package.__path__):
-        names.append(module_name)
-
-    return names
+def list_plugins():
+    return load_all_plugins()

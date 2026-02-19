@@ -1,71 +1,86 @@
 #!/usr/bin/env python3
-"""
-TRACEVECTOR OSINT CLI – Main Entry Point
-"""
 
 import sys
 import argparse
-from importlib import metadata
+import platform
 
-from tvx import plugin_loader
+from tvx import __version__
+from tvx.banner import show_banner
 from tvx.doctor import run_doctor
-
-APP_NAME = "TRACEVECTOR"
-CLI_NAME = "tvx"
-STABILITY = "stable"
-
-
-def get_version() -> str:
-    try:
-        return metadata.version("tracevector")
-    except metadata.PackageNotFoundError:
-        return "0.0.0"
-
-
-def print_banner():
-    banner = r"""
-████████╗██████╗  █████╗  ██████╗███████╗
-╚══██╔══╝██╔══██╗██╔══██╗██╔════╝██╔════╝
-   ██║   ██████╔╝███████║██║     █████╗
-   ██║   ██╔══██╗██╔══██║██║     ██╔══╝
-   ██║   ██║  ██║██║  ██║╚██████╗███████╗
-   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚══════╝
-
-        TRACEVECTOR OSINT CLI
-     Digital Footprint Investigator
-"""
-    print(banner)
+from tvx.plugin_loader import (
+    list_plugins,
+    get_plugins_by_type,
+)
 
 
 def print_version():
-    print(f"{APP_NAME} ({CLI_NAME}) v{get_version()} [{STABILITY}]")
+    print(f"TRACEVECTOR (tvx) v{__version__}")
 
 
-def build_parser() -> argparse.ArgumentParser:
+def print_plugins():
+    plugins = list_plugins()
+
+    if not plugins:
+        print("No plugins loaded.")
+        return
+
+    print("\nLoaded Plugins:\n")
+    for p in plugins:
+        info = p.PLUGIN_INFO
+        print(
+            f"[{info.get('type')}] "
+            f"{info.get('name')} "
+            f"({p.__name__})"
+        )
+
+
+def build_parser():
     parser = argparse.ArgumentParser(
-        prog=CLI_NAME,
-        description="TRACEVECTOR OSINT Command Line Interface",
+        prog="tvx",
+        description="TRACEVECTOR OSINT CLI Investigator",
         add_help=True,
+    )
+
+    parser.add_argument(
+        "command",
+        nargs="?",
+        help="Investigation type (phone, email, ip, etc)",
+    )
+
+    parser.add_argument(
+        "target",
+        nargs="?",
+        help="Target to investigate",
+    )
+
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON",
+    )
+
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Disable network-based plugins",
+    )
+
+    parser.add_argument(
+        "--no-banner",
+        action="store_true",
+        help="Disable ASCII banner",
+    )
+
+    parser.add_argument(
+        "--list-plugins",
+        action="store_true",
+        help="List all loaded plugins",
     )
 
     parser.add_argument(
         "--version",
         action="store_true",
-        help="Show TRACEVECTOR version and exit",
-    )
-
-    subparsers = parser.add_subparsers(dest="command")
-
-    # Doctor
-    subparsers.add_parser(
-        "doctor",
-        help="Run TRACEVECTOR environment diagnostics",
-    )
-
-    # Plugin passthrough (dynamic)
-    subparsers.add_parser(
-        "phone",
-        help="Investigate phone numbers (plugin-based)",
+        help="Show version info",
     )
 
     return parser
@@ -73,39 +88,56 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main():
     parser = build_parser()
-    args, unknown_args = parser.parse_known_args()
+    args = parser.parse_args()
 
-    # --version
+    # Version
     if args.version:
         print_version()
         return 0
 
-    # doctor
+    # List plugins
+    if args.list_plugins:
+        print_version()
+        print_plugins()
+        return 0
+
+    # Doctor command
     if args.command == "doctor":
         run_doctor()
         return 0
 
-    # No command → show help
+    # No command provided
     if not args.command:
-        print_banner()
         parser.print_help()
         return 1
 
-    # Plugin execution
-    plugins = plugin_loader.load_plugins(args.command)
+    # Banner
+    if not args.no_banner:
+        show_banner()
+
+    # Load plugins for command
+    plugins = get_plugins_by_type(args.command)
 
     if not plugins:
         print(f"[!] No plugin found for command: {args.command}")
         return 1
 
-    plugin = plugins[0]
-
-    print_banner()
-    try:
-        plugin.run(unknown_args)
-    except Exception as e:
-        print(f"[!] Plugin execution failed: {e}")
+    if not args.target:
+        print("[!] No target provided")
         return 1
+
+    # Execute plugins
+    for plugin in plugins:
+        try:
+            plugin.run(
+                target=args.target,
+                options={
+                    "json": args.json,
+                    "offline": args.offline,
+                },
+            )
+        except Exception as e:
+            print(f"[!] Plugin error ({plugin.__name__}): {e}")
 
     return 0
 

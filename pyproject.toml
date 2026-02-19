@@ -1,19 +1,12 @@
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "tracevector"
-version = "1.0.0"
-description = "Terminal-based OSINT investigation tool with a modular plugin architecture"
-readme = "README.md"
-license = { text = "MIT" }
-authors = [
-  { name = "Oedx Digitals" }
-]
+version = "2.5.0"
+description = "TRACEVECTOR OSINT CLI Investigator"
 requires-python = ">=3.9"
 dependencies = [
-  "phonenumbers"
+    "phonenumbers",
+    "dnspython",
+    "ipwhois"
 ]
 
 [project.urls]
