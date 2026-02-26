@@ -1,145 +1,197 @@
-#!/usr/bin/env python3
-
-import sys
 import argparse
-import platform
+import sys
+import json
 
-from tvx import __version__
-from tvx.banner import show_banner
+from tvx.plugin_loader import load_plugins
+from tvx.scoring import calculate_risk
 from tvx.doctor import run_doctor
-from tvx.plugin_loader import (
-    list_plugins,
-    get_plugins_by_type,
-)
+from tvx.config import set_key
+from tvx import __version__
+
+
+BANNER = r"""
+████████╗██████╗  █████╗  ██████╗███████╗
+╚══██╔══╝██╔══██╗██╔══██╗██╔════╝██╔════╝
+   ██║   ██████╔╝███████║██║     █████╗
+   ██║   ██╔══██╗██╔══██║██║     ██╔══╝
+   ██║   ██║  ██║██║  ██║╚██████╗███████╗
+   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚══════╝
+
+        TRACEVECTOR OSINT CLI
+     Digital Footprint Investigator
+"""
+
+
+# ---------------------------
+# Utility Functions
+# ---------------------------
+
+def print_banner():
+    print(BANNER)
 
 
 def print_version():
     print(f"TRACEVECTOR (tvx) v{__version__}")
 
 
-def print_plugins():
-    plugins = list_plugins()
-
-    if not plugins:
-        print("No plugins loaded.")
-        return
-
+def print_plugins(plugins):
     print("\nLoaded Plugins:\n")
-    for p in plugins:
-        info = p.PLUGIN_INFO
-        print(
-            f"[{info.get('type')}] "
-            f"{info.get('name')} "
-            f"({p.__name__})"
-        )
+    for plugin in plugins:
+        info = getattr(plugin, "PLUGIN_INFO", {})
+        cmd = info.get("command", "unknown")
+        name = info.get("name", "Unnamed Plugin")
+        print(f"[{cmd}] {name}")
+    print()
 
 
-def build_parser():
+def print_nested(data, indent=0):
+    for key, value in data.items():
+        if isinstance(value, dict):
+            print(" " * indent + f"{key}:")
+            print_nested(value, indent + 4)
+        else:
+            print(" " * indent + f"{key}: {value}")
+
+
+def format_pretty(result: dict, risk: dict):
+    print("\n=== Scan Result ===")
+    print_nested(result)
+
+    print("\n=== Risk Assessment ===")
+    print_nested(risk)
+    print()
+
+
+# ---------------------------
+# Main Entry
+# ---------------------------
+
+def main():
     parser = argparse.ArgumentParser(
         prog="tvx",
-        description="TRACEVECTOR OSINT CLI Investigator",
-        add_help=True,
+        description="TraceVector OSINT CLI"
     )
 
     parser.add_argument(
         "command",
         nargs="?",
-        help="Investigation type (phone, email, ip, etc)",
+        help="Command (doctor, config, or plugin type)"
     )
 
     parser.add_argument(
         "target",
         nargs="?",
-        help="Target to investigate",
-    )
-
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output results as JSON",
-    )
-
-    parser.add_argument(
-        "--offline",
-        action="store_true",
-        help="Disable network-based plugins",
-    )
-
-    parser.add_argument(
-        "--no-banner",
-        action="store_true",
-        help="Disable ASCII banner",
+        help="Target value or config KEY=VALUE"
     )
 
     parser.add_argument(
         "--list-plugins",
         action="store_true",
-        help="List all loaded plugins",
+        help="List all loaded plugins"
     )
 
     parser.add_argument(
         "--version",
         action="store_true",
-        help="Show version info",
+        help="Show version information"
     )
 
-    return parser
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output result as JSON"
+    )
 
-
-def main():
-    parser = build_parser()
     args = parser.parse_args()
 
+    plugins = load_plugins()
+
+    # ---------------------------
     # Version
+    # ---------------------------
     if args.version:
         print_version()
         return 0
 
-    # List plugins
-    if args.list_plugins:
-        print_version()
-        print_plugins()
-        return 0
-
-    # Doctor command
+    # ---------------------------
+    # Doctor
+    # ---------------------------
     if args.command == "doctor":
         run_doctor()
         return 0
 
-    # No command provided
+    # ---------------------------
+    # Config Command
+    # ---------------------------
+    if args.command == "config":
+        if not args.target:
+            print("Usage: tvx config KEY=VALUE")
+            return 1
+
+        if "=" not in args.target:
+            print("Format must be KEY=VALUE")
+            return 1
+
+        key, value = args.target.split("=", 1)
+        set_key(key.strip(), value.strip())
+        print(f"[✓] Config updated: {key}")
+        return 0
+
+    # ---------------------------
+    # List Plugins
+    # ---------------------------
+    if args.list_plugins:
+        print_version()
+        print_plugins(plugins)
+        return 0
+
+    # ---------------------------
+    # No Command Provided
+    # ---------------------------
     if not args.command:
+        print_banner()
         parser.print_help()
-        return 1
+        return 0
 
-    # Banner
-    if not args.no_banner:
-        show_banner()
+    # ---------------------------
+    # Plugin Execution
+    # ---------------------------
+    selected_plugin = None
+    for plugin in plugins:
+        info = getattr(plugin, "PLUGIN_INFO", {})
+        if info.get("command") == args.command:
+            selected_plugin = plugin
+            break
 
-    # Load plugins for command
-    plugins = get_plugins_by_type(args.command)
-
-    if not plugins:
-        print(f"[!] No plugin found for command: {args.command}")
+    if not selected_plugin:
+        print_banner()
+        print(f"\n[!] No plugin found for command: {args.command}\n")
         return 1
 
     if not args.target:
-        print("[!] No target provided")
+        print(f"[!] Target required for command: {args.command}")
         return 1
 
-    # Execute plugins
-    for plugin in plugins:
-        try:
-            plugin.run(
-                target=args.target,
-                options={
-                    "json": args.json,
-                    "offline": args.offline,
-                },
-            )
-        except Exception as e:
-            print(f"[!] Plugin error ({plugin.__name__}): {e}")
+    try:
+        print_banner()
 
-    return 0
+        result = selected_plugin.run(args.target)
+        risk = calculate_risk(result)
+
+        if args.json:
+            output = {
+                "scan": result,
+                "risk": risk
+            }
+            print(json.dumps(output, indent=4))
+        else:
+            format_pretty(result, risk)
+
+        return 0
+
+    except Exception as e:
+        print(f"\n[!] Error during execution: {e}")
+        return 1
 
 
 if __name__ == "__main__":
