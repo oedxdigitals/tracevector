@@ -1,146 +1,170 @@
-#!/usr/bin/env python3
-
-import sys
 import argparse
-import platform
+import json
+import sys
+from datetime import datetime
 
-from tvx import __version__
-from tvx.banner import show_banner
-from tvx.doctor import run_doctor
-from tvx.plugin_loader import (
-    list_plugins,
-    get_plugins_by_type,
-)
-
-
-def print_version():
-    print(f"TRACEVECTOR (tvx) v{__version__}")
+from tvx.plugin_loader import load_plugins
+from tvx.scoring import calculate_risk
+from tvx.reporting import generate_html
+from tvx.config import set_key
+from tvx.storage.manager import get_storage
 
 
-def print_plugins():
-    plugins = list_plugins()
+# =====================================
+# Banner
+# =====================================
+def print_banner():
+    print(r"""
+████████╗██████╗  █████╗  ██████╗███████╗
+╚══██╔══╝██╔══██╗██╔══██╗██╔════╝██╔════╝
+   ██║   ██████╔╝███████║██║     █████╗
+   ██║   ██╔══██╗██╔══██║██║     ██╔══╝
+   ██║   ██║  ██║██║  ██║╚██████╗███████╗
+   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚══════╝
 
-    if not plugins:
-        print("No plugins loaded.")
-        return
-
-    print("\nLoaded Plugins:\n")
-    for p in plugins:
-        info = p.PLUGIN_INFO
-        print(
-            f"[{info.get('type')}] "
-            f"{info.get('name')} "
-            f"({p.__name__})"
-        )
+        TRACEVECTOR FRAUD INTELLIGENCE
+""")
 
 
-def build_parser():
+# =====================================
+# Main
+# =====================================
+def main():
     parser = argparse.ArgumentParser(
         prog="tvx",
-        description="TRACEVECTOR OSINT CLI Investigator",
-        add_help=True,
+        description="TraceVector Fraud Intelligence Toolkit"
     )
 
-    parser.add_argument(
-        "command",
-        nargs="?",
-        help="Investigation type (phone, email, ip, etc)",
-    )
+    parser.add_argument("command", help="Core command or plugin")
+    parser.add_argument("args", nargs="*", help="Command arguments")
+    parser.add_argument("--json", action="store_true", help="Output JSON")
+    parser.add_argument("--report", help="Generate HTML report")
 
-    parser.add_argument(
-        "target",
-        nargs="?",
-        help="Target to investigate",
-    )
+    parsed = parser.parse_args()
 
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output results as JSON",
-    )
+    print_banner()
 
-    parser.add_argument(
-        "--offline",
-        action="store_true",
-        help="Disable network-based plugins",
-    )
+    command = parsed.command
+    arguments = parsed.args
 
-    parser.add_argument(
-        "--no-banner",
-        action="store_true",
-        help="Disable ASCII banner",
-    )
+    # =========================
+    # CORE: CONFIG
+    # =========================
+    if command == "config":
+        if not arguments or "=" not in arguments[0]:
+            print("Usage: tvx config key=value")
+            sys.exit(1)
 
-    parser.add_argument(
-        "--list-plugins",
-        action="store_true",
-        help="List all loaded plugins",
-    )
+        key, value = arguments[0].split("=", 1)
+        set_key(key.strip(), value.strip())
+        print(f"[✓] Config saved: {key}")
+        sys.exit(0)
 
-    parser.add_argument(
-        "--version",
-        action="store_true",
-        help="Show version info",
-    )
+    # =========================
+    # CORE: CASE
+    # =========================
+    if command == "case":
+        if not arguments:
+            print("Usage: tvx case <create|add|show>")
+            sys.exit(1)
 
-    return parser
+        action = arguments[0]
+        storage = get_storage()
 
+        # CREATE
+        if action == "create":
+            if len(arguments) < 2:
+                print("Usage: tvx case create CASE_ID")
+                sys.exit(1)
 
-def main():
-    parser = build_parser()
-    args = parser.parse_args()
+            case_id = arguments[1]
+            storage.create_case(case_id)
+            print(f"[✓] Case created: {case_id}")
+            sys.exit(0)
 
-    # Version
-    if args.version:
-        print_version()
-        return 0
+        # ADD
+        if action == "add":
+            if len(arguments) < 4:
+                print("Usage: tvx case add CASE_ID plugin target")
+                sys.exit(1)
 
-    # List plugins
-    if args.list_plugins:
-        print_version()
-        print_plugins()
-        return 0
+            case_id = arguments[1]
+            plugin_name = arguments[2]
+            target = arguments[3]
 
-    # Doctor command
-    if args.command == "doctor":
-        run_doctor()
-        return 0
+            plugins = load_plugins()
 
-    # No command provided
-    if not args.command:
-        parser.print_help()
-        return 1
+            if plugin_name not in plugins:
+                print("[!] Unknown plugin")
+                sys.exit(1)
 
-    # Banner
-    if not args.no_banner:
-        show_banner()
+            plugin = plugins[plugin_name]
+            result = plugin.run(target)
+            risk = calculate_risk(result)
 
-    # Load plugins for command
-    plugins = get_plugins_by_type(args.command)
+            storage.add_evidence(case_id, plugin_name, target, result, risk)
 
-    if not plugins:
-        print(f"[!] No plugin found for command: {args.command}")
-        return 1
+            print(f"[✓] Evidence added to case {case_id}")
+            print(f"Risk Level: {risk['level']} (Score: {risk['score']})")
+            sys.exit(0)
 
-    if not args.target:
-        print("[!] No target provided")
-        return 1
+        # SHOW
+        if action == "show":
+            if len(arguments) < 2:
+                print("Usage: tvx case show CASE_ID")
+                sys.exit(1)
 
-    # Execute plugins
-    for plugin in plugins:
-        try:
-            plugin.run(
-                target=args.target,
-                options={
-                    "json": args.json,
-                    "offline": args.offline,
-                },
-            )
-        except Exception as e:
-            print(f"[!] Plugin error ({plugin.__name__}): {e}")
+            case_id = arguments[1]
+            case_data = storage.get_case(case_id)
 
-    return 0
+            if not case_data["case"]:
+                print("[!] Case not found.")
+                sys.exit(1)
 
+            print(json.dumps(case_data, indent=2))
+            sys.exit(0)
 
-if __name__ == "__main__":
-    sys.exit(main())
+        print("Unknown case action.")
+        sys.exit(1)
+
+    # =========================
+    # PLUGIN EXECUTION
+    # =========================
+    plugins = load_plugins()
+
+    if command not in plugins:
+        print(f"[!] Unknown command: {command}")
+        print("Available plugins:", ", ".join(plugins.keys()))
+        sys.exit(1)
+
+    if not arguments:
+        print("[!] Target required.")
+        sys.exit(1)
+
+    target = arguments[0]
+    plugin = plugins[command]
+
+    try:
+        result = plugin.run(target)
+    except Exception as e:
+        print(f"[!] Plugin execution failed: {e}")
+        sys.exit(1)
+
+    risk = calculate_risk(result)
+
+    output = {
+        "scan": result,
+        "risk": risk
+    }
+
+    if parsed.json:
+        print(json.dumps(output, indent=2))
+    else:
+        print("\n=== Scan Result ===")
+        print(json.dumps(result, indent=2))
+        print("\n=== Risk Assessment ===")
+        print(json.dumps(risk, indent=2))
+
+    if parsed.report:
+        file_path = generate_html(output, risk, parsed.report)
+        print(f"\n[✓] HTML report generated: {file_path}")
